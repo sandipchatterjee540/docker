@@ -1,0 +1,73 @@
+pipeline {
+
+  environment {
+    registry = "sandip540/test"
+    dockerImage = ""
+    git_cr = 'GIT_CR'
+    git_url = 'https://github.com/sandipchatterjee540/docker.git'
+    
+  }
+
+  agent any
+
+  stages {
+
+    stage('Clean WORKSPACE') {
+      steps {
+        sh ''' 
+                  cd $WORKSPACE
+                  rm -rf *       
+            '''
+      }
+    }
+
+    stage('Checkout Source') {
+      steps {
+        sh 'echo ${BUILD_NUMBER}'
+        git credentialsId: git_cr , url: git_url
+      }
+    }
+
+    stage('Build image') {
+      steps{
+        script {
+          dockerImage = docker.build registry + ":$BUILD_NUMBER"
+        }
+      }
+    }
+
+    stage('Push Image') {
+      steps{
+        script {
+          sh 'echo $dockerImage'
+          withDockerRegistry(credentialsId: 'docker_id') {
+            dockerImage.push()
+          }
+        }
+      }
+    }
+        
+        
+    stage('analyze') {
+            steps {
+                sh 'echo "docker.io/sandip540/test:$BUILD_NUMBER `pwd`/Dockerfile" > anchore_images'
+                anchore engineCredentialsId: 'anchore_cr', engineurl: 'http://10.100.99.188:8228/v1', forceAnalyze: true, name: 'anchore_images' 
+            }
+        }
+    stage('teardown') {
+            steps {
+                sh'''
+                    for i in `cat anchore_images | awk '{print $1}'`;do docker rmi $i; done
+                '''
+            }
+        }    
+ }
+ 
+ post {
+    always {
+       mail to: 'sandip.chatterjee@optimizeitsystems.com',
+          subject: "Status of pipeline: ${currentBuild.fullDisplayName}",
+          body: "${env.BUILD_URL}anchore-results/ has result ${currentBuild.result}"
+    }
+  }
+}
